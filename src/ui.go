@@ -14,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -128,21 +129,23 @@ func RunUI(stateMachine *StateMachine) {
 	)
 
 	// Combine all dashboard layout containers
-	dashboardContent := container.NewVBox(
-		widget.NewLabelWithStyle("DESKTOP REST REMINDER", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		statusLabel,
-		timerLabel,
-		cycleLabel,
-		controls,
-		widget.NewSeparator(),
-		settingsPanel,
-		widget.NewSeparator(),
+	dashboardContent := container.NewHBox(
+		container.NewVBox(
+			widget.NewLabelWithStyle("REMINDER CONTROL", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+			statusLabel,
+			timerLabel,
+			cycleLabel,
+			controls,
+			widget.NewSeparator(),
+			settingsPanel,
+			widget.NewSeparator(),
+		),
 		calendarPanel,
 	)
 
-	// Wrap in a vertical scroll container to make the UI responsive and prevent vertical clipping
-	scrollContainer := container.NewVScroll(dashboardContent)
-	dashboardWin.SetContent(scrollContainer)
+	mainContent := container.New(layout.NewCenterLayout(), dashboardContent)
+
+	dashboardWin.SetContent(mainContent)
 
 	// Define State Machine Callback
 	sm.OnModeChange = func(oldMode, newMode Mode) {
@@ -209,8 +212,10 @@ func buildCalendarGrid() fyne.CanvasObject {
 	grid := container.NewGridWithColumns(7)
 	for col := 0; col < 30; col++ {
 		rect := canvas.NewRectangle(color.NRGBA{R: 239, G: 242, B: 245, A: 255})
-		rect.SetMinSize(fyne.NewSize(12, 12))
-		rect.CornerRadius = 10.0
+		rect.SetMinSize(fyne.NewSize(20, 20))
+		rect.StrokeColor = color.NRGBA{R: 128, G: 119, B: 105, A: 0}
+		rect.StrokeWidth = 0.5
+		rect.CornerRadius = 1.5
 		calendarRects[col] = rect
 		grid.Add(rect)
 	}
