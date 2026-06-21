@@ -1,0 +1,28 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+restreminder
+
+# Test binaries
+*.test
+*.out
+
+# Go vendor
+vendor/
+
+# Operating System files
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+
+# IDEs/Editors
+.vscode/
+.idea/
+
+# Local configuration/history (if created in project dir)
+settings.json
+history.json
