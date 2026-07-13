@@ -1,12 +1,25 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
+	"os"
 	"time"
 )
 
+var version = "0.1.0"
+
 func main() {
+	showVersion := flag.Bool("v", false, "show version and exit")
+	showVersionLong := flag.Bool("version", false, "show version and exit")
+	flag.Parse()
+
+	if *showVersion || *showVersionLong {
+		fmt.Println(version)
+		os.Exit(0)
+	}
+
 	cfg, err := LoadConfig()
 	if err != nil {
 		log.Fatalf("Error loading config: %v", err)
@@ -26,6 +39,6 @@ func main() {
 		}
 	}
 
-	fmt.Println("Starting restreminder desktop application...")
+	fmt.Printf("Starting restreminder desktop application v%s...\n", version)
 	RunUI(sm)
 }

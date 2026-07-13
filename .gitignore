@@ -27,4 +27,8 @@ Thumbs.db
 settings.json
 history.json
 
+# Build outputs
+build/
+*.deb
+
 specs/
