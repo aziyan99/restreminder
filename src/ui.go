@@ -42,7 +42,9 @@ var (
 	editCyclesBeforeLongRest int
 
 	// Focus history calendar grid rectangles
-	calendarRects [30]*canvas.Rectangle
+	calendarRects      [42]*canvas.Rectangle
+	selectedMonth      time.Time
+	monthFilterButtons []*widget.Button
 )
 
 func RunUI(stateMachine *StateMachine) {
@@ -55,6 +57,10 @@ func RunUI(stateMachine *StateMachine) {
 	editCyclesBeforeLongRest = sm.Config.CyclesBeforeLongRest
 
 	fyneApp = app.NewWithID("com.restreminder.app")
+	now := time.Now()
+	currentYear, currentMonth, _ := now.Date()
+	selectedMonth = time.Date(currentYear, currentMonth, 1, 0, 0, 0, 0, time.Local)
+
 	if iconRes, err := fyne.LoadResourceFromPath("assets/icon-512.png"); err != nil {
 		log.Printf("Warning: failed to load app icon: %v", err)
 	} else {
@@ -142,9 +148,15 @@ func RunUI(stateMachine *StateMachine) {
 
 	// 3. Calendar Grid Panel
 	calendarContainer := buildCalendarGrid()
-	calendarPanel := container.NewVBox(
-		widget.NewLabelWithStyle("FOCUS HISTORY (LAST 30 DAYS)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+	monthFilter := buildMonthFilter()
+	calendarAndFilter := container.NewHBox(
 		calendarContainer,
+		widget.NewSeparator(),
+		monthFilter,
+	)
+	calendarPanel := container.NewVBox(
+		widget.NewLabelWithStyle("FOCUS HISTORY", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		calendarAndFilter,
 	)
 
 	// Combine all dashboard layout containers
@@ -228,17 +240,27 @@ func makeSettingRow(name string, valPtr *int, min, max int) fyne.CanvasObject {
 }
 
 func buildCalendarGrid() fyne.CanvasObject {
+	// Create headers row for day name initials
+	headers := container.NewGridWithColumns(7)
+	dayNames := []string{"S", "M", "T", "W", "T", "F", "S"}
+	for _, name := range dayNames {
+		lbl := widget.NewLabelWithStyle(name, fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
+		headers.Add(lbl)
+	}
+
+	// Create calendar cells grid (6 rows of 7 columns = 42 cells)
 	grid := container.NewGridWithColumns(7)
-	for col := 0; col < 30; col++ {
+	for col := 0; col < 42; col++ {
 		rect := canvas.NewRectangle(color.NRGBA{R: 239, G: 242, B: 245, A: 255})
-		rect.SetMinSize(fyne.NewSize(20, 20))
+		rect.SetMinSize(fyne.NewSize(22, 22))
 		rect.StrokeColor = color.NRGBA{R: 128, G: 119, B: 105, A: 0}
 		rect.StrokeWidth = 0.5
 		rect.CornerRadius = 1.5
 		calendarRects[col] = rect
 		grid.Add(rect)
 	}
-	return grid
+
+	return container.NewVBox(headers, grid)
 }
 
 func updateCalendarGrid() {
@@ -247,29 +269,40 @@ func updateCalendarGrid() {
 		logs = []FocusLog{}
 	}
 
-	historyMap := make(map[string]int)
+	historyMap := make(map[int]int)
+	targetYear := selectedMonth.Year()
+	targetMonth := selectedMonth.Month()
+
 	for _, l := range logs {
 		if l.Status == "completed" && len(l.Timestamp) >= 10 {
-			dayKey := l.Timestamp[:10]
-			historyMap[dayKey]++
+			t, err := time.Parse("2006-01-02", l.Timestamp[:10])
+			if err == nil {
+				if t.Year() == targetYear && t.Month() == targetMonth {
+					historyMap[t.Day()]++
+				}
+			}
 		}
 	}
 
-	now := time.Now()
-	startDate := now.AddDate(0, 0, -29) // Last 30 days chronologically
+	// Calculate alignment
+	firstDay := time.Date(targetYear, targetMonth, 1, 0, 0, 0, 0, time.Local)
+	startWeekday := int(firstDay.Weekday()) // 0 = Sunday, 1 = Monday, ...
 
-	for col := 0; col < 30; col++ {
-		day := startDate.AddDate(0, 0, col)
-		dayStr := day.Format("2006-01-02")
+	nextMonth := firstDay.AddDate(0, 1, 0)
+	lastDay := nextMonth.AddDate(0, 0, -1)
+	daysInMonth := lastDay.Day()
 
-		rect := calendarRects[col]
-		if day.After(now) {
+	for i := 0; i < 42; i++ {
+		rect := calendarRects[i]
+		if i < startWeekday || i >= startWeekday+daysInMonth {
 			rect.FillColor = color.Transparent
 			rect.Refresh()
 			continue
 		}
 
-		count := historyMap[dayStr]
+		day := i - startWeekday + 1
+		count := historyMap[day]
+
 		var fill color.Color
 		switch {
 		case count == 0:
@@ -286,6 +319,46 @@ func updateCalendarGrid() {
 		rect.FillColor = fill
 		rect.Refresh()
 	}
+}
+
+func buildMonthFilter() fyne.CanvasObject {
+	box := container.NewVBox()
+
+	now := time.Now()
+	currentYear, currentMonth, _ := now.Date()
+	firstOfCurrent := time.Date(currentYear, currentMonth, 1, 0, 0, 0, 0, time.Local)
+
+	for i := 0; i < 12; i++ {
+		monthDate := firstOfCurrent.AddDate(0, -i, 0)
+		label := monthDate.Format("Jan 2006")
+
+		mDate := monthDate
+
+		var btn *widget.Button
+		btn = widget.NewButton(label, func() {
+			selectedMonth = mDate
+			updateCalendarGrid()
+			for idx, b := range monthFilterButtons {
+				targetDate := firstOfCurrent.AddDate(0, -idx, 0)
+				if targetDate.Year() == selectedMonth.Year() && targetDate.Month() == selectedMonth.Month() {
+					b.Disable()
+				} else {
+					b.Enable()
+				}
+			}
+		})
+
+		if i == 0 {
+			btn.Disable()
+		}
+
+		monthFilterButtons = append(monthFilterButtons, btn)
+		box.Add(btn)
+	}
+
+	scroll := container.NewVScroll(box)
+	scroll.SetMinSize(fyne.NewSize(110, 240))
+	return scroll
 }
 
 func updateUIElements() {
