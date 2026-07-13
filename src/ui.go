@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"image"
 	"image/color"
+	"image/png"
 	"log"
 	"time"
 
@@ -22,6 +25,9 @@ var (
 	sm           *StateMachine
 	appIcon      fyne.Resource
 	trayIcon     fyne.Resource
+
+	lastTrayMode    Mode = ModeIdle
+	lastTrayMinutes int  = -1
 
 	// UI elements that need dynamic updates
 	statusLabel       *widget.Label
@@ -318,6 +324,11 @@ func updateUIElements() {
 
 	// Update history activity grid colors
 	updateCalendarGrid()
+
+	// Update system tray icon dynamically if available
+	if desk, ok := fyneApp.(desktop.App); ok {
+		updateTrayIcon(desk)
+	}
 }
 
 func showRestOverlay(mode Mode) {
@@ -362,9 +373,112 @@ func dismissRestOverlay() {
 	}
 }
 
+var font3x5 = [10][5]uint16{
+	{0b111, 0b101, 0b101, 0b101, 0b111}, // 0
+	{0b010, 0b110, 0b010, 0b010, 0b111}, // 1
+	{0b111, 0b001, 0b111, 0b100, 0b111}, // 2
+	{0b111, 0b001, 0b111, 0b001, 0b111}, // 3
+	{0b101, 0b101, 0b111, 0b001, 0b001}, // 4
+	{0b111, 0b100, 0b111, 0b001, 0b111}, // 5
+	{0b111, 0b100, 0b111, 0b101, 0b111}, // 6
+	{0b111, 0b001, 0b001, 0b001, 0b001}, // 7
+	{0b111, 0b101, 0b111, 0b101, 0b111}, // 8
+	{0b111, 0b101, 0b111, 0b001, 0b111}, // 9
+}
+
+func drawDigit(img *image.RGBA, digit int, offsetX, offsetY int, col color.Color) {
+	if digit < 0 || digit > 9 {
+		return
+	}
+	bitmap := font3x5[digit]
+	for row := 0; row < 5; row++ {
+		line := bitmap[row]
+		for colIdx := 0; colIdx < 3; colIdx++ {
+			shift := 2 - colIdx
+			bit := (line >> shift) & 1
+			if bit == 1 {
+				img.Set(offsetX+colIdx, offsetY+row, col)
+			}
+		}
+	}
+}
+
+func createTrayIcon(mode Mode, minutes int) fyne.Resource {
+	if mode == ModeIdle {
+		return trayIcon
+	}
+
+	// Cap display minutes to 99 to fit on the icon
+	displayMin := minutes
+	if displayMin > 99 {
+		displayMin = 99
+	}
+
+	img := image.NewRGBA(image.Rect(0, 0, 16, 16))
+	
+	// Determine background color and text color based on mode
+	var bgFill color.Color
+	var textCol color.Color = color.White
+
+	switch mode {
+	case ModeFocus:
+		bgFill = color.RGBA{90, 72, 139, 255} // app icon bg color (purple/indigo)
+	case ModeShortRest, ModeLongRest:
+		bgFill = color.RGBA{166, 227, 161, 255} // green
+		textCol = color.RGBA{30, 30, 46, 255}    // dark text for contrast on green
+	default:
+		bgFill = color.RGBA{88, 91, 112, 255}  // grey
+	}
+
+	// Draw circular background shape (radius ~7.5 px)
+	for x := 0; x < 16; x++ {
+		for y := 0; y < 16; y++ {
+			dx := float64(x) - 7.5
+			dy := float64(y) - 7.5
+			dist := dx*dx + dy*dy
+			if dist <= 56.25 {
+				img.Set(x, y, bgFill)
+			} else {
+				img.Set(x, y, color.Transparent)
+			}
+		}
+	}
+
+	// Draw countdown digits
+	if displayMin >= 0 {
+		if displayMin < 10 {
+			// Center single digit
+			drawDigit(img, displayMin, 6, 5, textCol)
+		} else {
+			// Center two digits
+			drawDigit(img, displayMin/10, 4, 5, textCol)
+			drawDigit(img, displayMin%10, 8, 5, textCol)
+		}
+	}
+
+	var buf bytes.Buffer
+	_ = png.Encode(&buf, img)
+	// Bypasses Fyne's cache using mode & minutes in the name
+	return fyne.NewStaticResource(fmt.Sprintf("tray_icon_%s_%d.png", mode, displayMin), buf.Bytes())
+}
+
 func updateTrayIcon(desk desktop.App) {
-	if trayIcon != nil {
-		desk.SetSystemTrayIcon(trayIcon)
+	minutes := 0
+	if sm.Mode != ModeIdle {
+		// Use ceiling division so we display the minute in progress (e.g. 24m59s shows "25")
+		minutes = (sm.RemainingSeconds + 59) / 60
+	}
+
+	if sm.Mode == lastTrayMode && minutes == lastTrayMinutes {
+		return
+	}
+
+	lastTrayMode = sm.Mode
+	lastTrayMinutes = minutes
+
+	icon := createTrayIcon(sm.Mode, minutes)
+	if icon != nil {
+		desk.SetSystemTrayIcon(icon)
 	}
 }
 
