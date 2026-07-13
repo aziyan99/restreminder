@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	_ "embed"
 	"fmt"
 	"image"
 	"image/color"
@@ -17,6 +18,12 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 )
+
+//go:embed assets/icon-512.png
+var icon512Bytes []byte
+
+//go:embed assets/icon-192.png
+var icon192Bytes []byte
 
 var (
 	fyneApp      fyne.App
@@ -61,17 +68,9 @@ func RunUI(stateMachine *StateMachine) {
 	currentYear, currentMonth, _ := now.Date()
 	selectedMonth = time.Date(currentYear, currentMonth, 1, 0, 0, 0, 0, time.Local)
 
-	if iconRes, err := fyne.LoadResourceFromPath("assets/icon-512.png"); err != nil {
-		log.Printf("Warning: failed to load app icon: %v", err)
-	} else {
-		appIcon = iconRes
-		fyneApp.SetIcon(appIcon)
-	}
-	if tIcon, err := fyne.LoadResourceFromPath("assets/icon-192.png"); err == nil {
-		trayIcon = tIcon
-	} else if appIcon != nil {
-		trayIcon = appIcon
-	}
+	appIcon = fyne.NewStaticResource("icon-512.png", icon512Bytes)
+	fyneApp.SetIcon(appIcon)
+	trayIcon = fyne.NewStaticResource("icon-192.png", icon192Bytes)
 	dashboardWin = fyneApp.NewWindow("Desktop Rest Reminder")
 	if appIcon != nil {
 		dashboardWin.SetIcon(appIcon)
