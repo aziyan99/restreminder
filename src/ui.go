@@ -8,6 +8,8 @@ import (
 	"image/color"
 	"image/png"
 	"log"
+	"runtime"
+	"runtime/debug"
 	"time"
 
 	"fyne.io/fyne/v2"
@@ -55,6 +57,9 @@ var (
 )
 
 func RunUI(stateMachine *StateMachine) {
+	// Tune GC to be aggressive and return memory to OS immediately
+	debug.SetGCPercent(20)
+
 	sm = stateMachine
 
 	// Load local settings edits
@@ -77,9 +82,13 @@ func RunUI(stateMachine *StateMachine) {
 	}
 	dashboardWin.Resize(fyne.NewSize(600, 480))
 
-	// Intercept dashboard close to hide instead of quit
+	// Intercept dashboard close to hide instead of quit and free memory
 	dashboardWin.SetCloseIntercept(func() {
 		dashboardWin.Hide()
+		go func() {
+			runtime.GC()
+			debug.FreeOSMemory()
+		}()
 	})
 
 	// Construct System Tray Menu & Icon
@@ -195,6 +204,13 @@ func RunUI(stateMachine *StateMachine) {
 			}
 
 			updateUIElements()
+			updateCalendarGrid()
+
+			// Free unused memory pages back to OS on state transition
+			go func() {
+				runtime.GC()
+				debug.FreeOSMemory()
+			}()
 		})
 	}
 
@@ -212,6 +228,13 @@ func RunUI(stateMachine *StateMachine) {
 
 	// Initialize UI Display Elements
 	updateUIElements()
+	updateCalendarGrid()
+
+	// Initial free of startup allocations
+	go func() {
+		runtime.GC()
+		debug.FreeOSMemory()
+	}()
 
 	// Run Application Loop
 	fyneApp.Run()
@@ -394,8 +417,7 @@ func updateUIElements() {
 		overlayTimerLabel.SetText(fmt.Sprintf("%02d:%02d", minutes, seconds))
 	}
 
-	// Update history activity grid colors
-	updateCalendarGrid()
+	// Calendar grid is updated only on state transitions or filter change to save RAM/CPU
 
 	// Update system tray icon dynamically if available
 	if desk, ok := fyneApp.(desktop.App); ok {
