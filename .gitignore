@@ -26,3 +26,5 @@ Thumbs.db
 # Local configuration/history (if created in project dir)
 settings.json
 history.json
+
+specs/

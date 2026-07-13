@@ -1,11 +1,8 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
-	"image"
 	"image/color"
-	"image/png"
 	"log"
 	"time"
 
@@ -23,6 +20,8 @@ var (
 	dashboardWin fyne.Window
 	overlayWin   fyne.Window
 	sm           *StateMachine
+	appIcon      fyne.Resource
+	trayIcon     fyne.Resource
 
 	// UI elements that need dynamic updates
 	statusLabel       *widget.Label
@@ -50,7 +49,21 @@ func RunUI(stateMachine *StateMachine) {
 	editCyclesBeforeLongRest = sm.Config.CyclesBeforeLongRest
 
 	fyneApp = app.NewWithID("com.restreminder.app")
+	if iconRes, err := fyne.LoadResourceFromPath("assets/icon-512.png"); err != nil {
+		log.Printf("Warning: failed to load app icon: %v", err)
+	} else {
+		appIcon = iconRes
+		fyneApp.SetIcon(appIcon)
+	}
+	if tIcon, err := fyne.LoadResourceFromPath("assets/icon-192.png"); err == nil {
+		trayIcon = tIcon
+	} else if appIcon != nil {
+		trayIcon = appIcon
+	}
 	dashboardWin = fyneApp.NewWindow("Desktop Rest Reminder")
+	if appIcon != nil {
+		dashboardWin.SetIcon(appIcon)
+	}
 	dashboardWin.Resize(fyne.NewSize(600, 480))
 
 	// Intercept dashboard close to hide instead of quit
@@ -311,6 +324,9 @@ func showRestOverlay(mode Mode) {
 	dismissRestOverlay()
 
 	overlayWin = fyneApp.NewWindow("Rest Overlay")
+	if appIcon != nil {
+		overlayWin.SetIcon(appIcon)
+	}
 	overlayWin.SetFullScreen(true)
 
 	labelText := "REST IN PROGRESS"
@@ -347,27 +363,9 @@ func dismissRestOverlay() {
 }
 
 func updateTrayIcon(desk desktop.App) {
-	icon := createTrayIcon(sm.Mode)
-	desk.SetSystemTrayIcon(icon)
-}
-
-func createTrayIcon(mode Mode) fyne.Resource {
-	img := image.NewRGBA(image.Rect(0, 0, 16, 16))
-	var fill color.Color = color.RGBA{88, 91, 112, 255} // grey
-	switch mode {
-	case ModeFocus:
-		fill = color.RGBA{243, 139, 168, 255} // red
-	case ModeShortRest, ModeLongRest:
-		fill = color.RGBA{166, 227, 161, 255} // green
+	if trayIcon != nil {
+		desk.SetSystemTrayIcon(trayIcon)
 	}
-	for x := 0; x < 16; x++ {
-		for y := 0; y < 16; y++ {
-			img.Set(x, y, fill)
-		}
-	}
-	var buf bytes.Buffer
-	_ = png.Encode(&buf, img)
-	return fyne.NewStaticResource("tray_icon.png", buf.Bytes())
 }
 
 func ShowNotification(title, message string) {
