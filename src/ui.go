@@ -714,6 +714,10 @@ func ShowNotification(title, message string) {
 }
 
 func updateTrayMenu(desk desktop.App) {
+	quitItem := fyne.NewMenuItem("Quit", func() {
+		fyneApp.Quit()
+	})
+
 	var menu *fyne.Menu
 	if sm.Mode == ModeIdle {
 		menu = fyne.NewMenu("Rest Reminder",
@@ -730,6 +734,8 @@ func updateTrayMenu(desk desktop.App) {
 				dashboardWin.Show()
 				dashboardWin.RequestFocus()
 			}),
+			fyne.NewMenuItemSeparator(),
+			quitItem,
 		)
 	} else {
 		menu = fyne.NewMenu("Rest Reminder",
@@ -740,6 +746,8 @@ func updateTrayMenu(desk desktop.App) {
 				dashboardWin.Show()
 				dashboardWin.RequestFocus()
 			}),
+			fyne.NewMenuItemSeparator(),
+			quitItem,
 		)
 	}
 	desk.SetSystemTrayMenu(menu)
