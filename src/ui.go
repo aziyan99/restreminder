@@ -43,6 +43,9 @@ var (
 	timerLabel        *widget.Label
 	cycleLabel        *widget.Label
 	overlayTimerLabel *widget.Label
+	startBtn          *widget.Button
+	stopBtn           *widget.Button
+	controls          *fyne.Container
 
 	// Settings edits
 	editFocusDuration        int
@@ -50,8 +53,9 @@ var (
 	editLongRestDuration     int
 	editCyclesBeforeLongRest int
 
-	// Focus history calendar grid rectangles
-	calendarRects      [42]*canvas.Rectangle
+	// Focus history calendar grid cells
+	calendarCells      [42]*calendarCell
+	currentTooltip     fyne.CanvasObject
 	selectedMonth      time.Time
 	monthFilterButtons []*widget.Button
 )
@@ -93,41 +97,27 @@ func RunUI(stateMachine *StateMachine) {
 
 	// Construct System Tray Menu & Icon
 	if desk, ok := fyneApp.(desktop.App); ok {
-		menu := fyne.NewMenu("Rest Reminder",
-			fyne.NewMenuItem("Start Focus", func() {
-				sm.Start()
-			}),
-			fyne.NewMenuItem("Start Short Break", func() {
-				sm.StartShortRest()
-			}),
-			fyne.NewMenuItem("Start Long Break", func() {
-				sm.StartLongRest()
-			}),
-			fyne.NewMenuItem("Open Dashboard", func() {
-				dashboardWin.Show()
-				dashboardWin.RequestFocus()
-			}),
-		)
-		desk.SetSystemTrayMenu(menu)
 		desk.SetSystemTrayWindow(dashboardWin)
+		updateTrayMenu(desk)
 		updateTrayIcon(desk)
 	}
 
-	// 1. Dashboard UI Layout
+	// Dashboard UI Layout
 	statusLabel = widget.NewLabel("Status: IDLE")
 	timerLabel = widget.NewLabel("Time  : 00:00")
 	cycleLabel = widget.NewLabel("Cycle : 1 / 4")
 
-	startBtn := widget.NewButton("START", func() {
+	startBtn = widget.NewButton("START", func() {
 		sm.Start()
 	})
-	stopBtn := widget.NewButton("STOP", func() {
+	stopBtn = widget.NewButton("STOP", func() {
 		sm.Stop()
 	})
+	stopBtn.Hide()
 
-	controls := container.NewHBox(startBtn, stopBtn)
+	controls = container.NewHBox(startBtn, stopBtn)
 
-	// 2. Settings Row Panel
+	// Settings Row Panel
 	focusRow := makeSettingRow("Focus Duration", &editFocusDuration, 1, 180)
 	shortRow := makeSettingRow("Short Rest", &editShortRestDuration, 1, 60)
 	longRow := makeSettingRow("Long Rest", &editLongRestDuration, 1, 120)
@@ -154,7 +144,7 @@ func RunUI(stateMachine *StateMachine) {
 		saveBtn,
 	)
 
-	// 3. Calendar Grid Panel
+	// Calendar Grid Panel
 	calendarContainer := buildCalendarGrid()
 	monthFilter := buildMonthFilter()
 	calendarAndFilter := container.NewHBox(
@@ -192,6 +182,7 @@ func RunUI(stateMachine *StateMachine) {
 		fyne.Do(func() {
 			if desk, ok := fyneApp.(desktop.App); ok {
 				updateTrayIcon(desk)
+				updateTrayMenu(desk)
 			}
 
 			if newMode == ModeShortRest || newMode == ModeLongRest {
@@ -261,9 +252,130 @@ func makeSettingRow(name string, valPtr *int, min, max int) fyne.CanvasObject {
 	return container.NewHBox(label, decBtn, valLabel, incBtn)
 }
 
+type squareGridLayout struct {
+	columns  int
+	cellSize float32
+	spacing  float32
+}
+
+func (s *squareGridLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	rows := (len(objects) + s.columns - 1) / s.columns
+	w := float32(s.columns)*s.cellSize + float32(s.columns-1)*s.spacing
+	h := float32(rows)*s.cellSize + float32(rows-1)*s.spacing
+	return fyne.NewSize(w, h)
+}
+
+func (s *squareGridLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	for i, obj := range objects {
+		row := i / s.columns
+		col := i % s.columns
+		x := float32(col) * (s.cellSize + s.spacing)
+		y := float32(row) * (s.cellSize + s.spacing)
+		obj.Move(fyne.NewPos(x, y))
+		obj.Resize(fyne.NewSize(s.cellSize, s.cellSize))
+	}
+}
+
+type headersLayout struct {
+	columns  int
+	cellSize float32
+	spacing  float32
+}
+
+func (h *headersLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
+	w := float32(h.columns)*h.cellSize + float32(h.columns-1)*h.spacing
+	return fyne.NewSize(w, 20)
+}
+
+func (h *headersLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
+	for i, obj := range objects {
+		if i >= h.columns {
+			break
+		}
+		x := float32(i) * (h.cellSize + h.spacing)
+		obj.Move(fyne.NewPos(x, 0))
+		obj.Resize(fyne.NewSize(h.cellSize, 20))
+	}
+}
+
+type calendarCell struct {
+	widget.BaseWidget
+	rect  *canvas.Rectangle
+	date  string
+	count int
+}
+
+func newCalendarCell(rect *canvas.Rectangle, date string, count int) *calendarCell {
+	c := &calendarCell{
+		rect:  rect,
+		date:  date,
+		count: count,
+	}
+	c.ExtendBaseWidget(c)
+	return c
+}
+
+func (c *calendarCell) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(c.rect)
+}
+
+func (c *calendarCell) MouseIn(ev *desktop.MouseEvent) {
+	if c.date == "" {
+		return
+	}
+	text := fmt.Sprintf("%s: %d session", c.date, c.count)
+	if c.count != 1 {
+		text += "s"
+	}
+	showTooltip(text, c)
+}
+
+func (c *calendarCell) MouseOut() {
+	hideTooltip()
+}
+
+func (c *calendarCell) MouseMoved(ev *desktop.MouseEvent) {}
+
+func showTooltip(text string, cell fyne.CanvasObject) {
+	hideTooltip()
+
+	lbl := widget.NewLabelWithStyle(text, fyne.TextAlignCenter, fyne.TextStyle{})
+	
+	// Create dark background rectangle
+	bg := canvas.NewRectangle(color.NRGBA{R: 30, G: 30, B: 30, A: 230})
+	bg.CornerRadius = 3
+
+	container := container.NewMax(bg, lbl)
+	minSize := container.MinSize()
+	container.Resize(minSize)
+
+	pos := fyne.CurrentApp().Driver().AbsolutePositionForObject(cell)
+	cellSize := cell.Size()
+
+	x := pos.X + (cellSize.Width-minSize.Width)/2
+	y := pos.Y - minSize.Height - 4
+
+	container.Move(fyne.NewPos(x, y))
+
+	currentTooltip = container
+	if dashboardWin != nil {
+		dashboardWin.Canvas().Overlays().Add(currentTooltip)
+	}
+}
+
+func hideTooltip() {
+	if currentTooltip != nil && dashboardWin != nil {
+		dashboardWin.Canvas().Overlays().Remove(currentTooltip)
+		currentTooltip = nil
+	}
+}
+
 func buildCalendarGrid() fyne.CanvasObject {
+	cellSize := float32(20)
+	spacing := float32(2)
+
 	// Create headers row for day name initials
-	headers := container.NewGridWithColumns(7)
+	headers := container.New(&headersLayout{columns: 7, cellSize: cellSize, spacing: spacing})
 	dayNames := []string{"S", "M", "T", "W", "T", "F", "S"}
 	for _, name := range dayNames {
 		lbl := widget.NewLabelWithStyle(name, fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
@@ -271,15 +383,16 @@ func buildCalendarGrid() fyne.CanvasObject {
 	}
 
 	// Create calendar cells grid (6 rows of 7 columns = 42 cells)
-	grid := container.NewGridWithColumns(7)
+	grid := container.New(&squareGridLayout{columns: 7, cellSize: cellSize, spacing: spacing})
 	for col := 0; col < 42; col++ {
 		rect := canvas.NewRectangle(color.NRGBA{R: 239, G: 242, B: 245, A: 255})
-		rect.SetMinSize(fyne.NewSize(22, 22))
+		rect.SetMinSize(fyne.NewSize(cellSize, cellSize))
 		rect.StrokeColor = color.NRGBA{R: 128, G: 119, B: 105, A: 0}
 		rect.StrokeWidth = 0.5
 		rect.CornerRadius = 1.5
-		calendarRects[col] = rect
-		grid.Add(rect)
+		cell := newCalendarCell(rect, "", 0)
+		calendarCells[col] = cell
+		grid.Add(cell)
 	}
 
 	return container.NewVBox(headers, grid)
@@ -315,15 +428,23 @@ func updateCalendarGrid() {
 	daysInMonth := lastDay.Day()
 
 	for i := 0; i < 42; i++ {
-		rect := calendarRects[i]
+		cell := calendarCells[i]
+		if cell == nil {
+			continue
+		}
+		rect := cell.rect
 		if i < startWeekday || i >= startWeekday+daysInMonth {
 			rect.FillColor = color.Transparent
+			cell.date = ""
+			cell.count = 0
 			rect.Refresh()
 			continue
 		}
 
 		day := i - startWeekday + 1
 		count := historyMap[day]
+		cell.date = fmt.Sprintf("%04d-%02d-%02d", targetYear, targetMonth, day)
+		cell.count = count
 
 		var fill color.Color
 		switch {
@@ -423,6 +544,18 @@ func updateUIElements() {
 	if desk, ok := fyneApp.(desktop.App); ok {
 		updateTrayIcon(desk)
 	}
+
+	// Toggle Start/Stop button visibility based on Idle state
+	if startBtn != nil && stopBtn != nil && controls != nil {
+		if sm.Mode == ModeIdle {
+			startBtn.Show()
+			stopBtn.Hide()
+		} else {
+			startBtn.Hide()
+			stopBtn.Show()
+		}
+		controls.Refresh()
+	}
 }
 
 func showRestOverlay(mode Mode) {
@@ -509,7 +642,7 @@ func createTrayIcon(mode Mode, minutes int) fyne.Resource {
 	}
 
 	img := image.NewRGBA(image.Rect(0, 0, 16, 16))
-	
+
 	// Determine background color and text color based on mode
 	var bgFill color.Color
 	var textCol color.Color = color.White
@@ -519,9 +652,9 @@ func createTrayIcon(mode Mode, minutes int) fyne.Resource {
 		bgFill = color.RGBA{90, 72, 139, 255} // app icon bg color (purple/indigo)
 	case ModeShortRest, ModeLongRest:
 		bgFill = color.RGBA{166, 227, 161, 255} // green
-		textCol = color.RGBA{30, 30, 46, 255}    // dark text for contrast on green
+		textCol = color.RGBA{30, 30, 46, 255}   // dark text for contrast on green
 	default:
-		bgFill = color.RGBA{88, 91, 112, 255}  // grey
+		bgFill = color.RGBA{88, 91, 112, 255} // grey
 	}
 
 	// Draw circular background shape (radius ~7.5 px)
@@ -577,7 +710,37 @@ func updateTrayIcon(desk desktop.App) {
 }
 
 func ShowNotification(title, message string) {
-	if fyneApp != nil {
-		fyneApp.SendNotification(fyne.NewNotification(title, message))
+	showNotification(title, message)
+}
+
+func updateTrayMenu(desk desktop.App) {
+	var menu *fyne.Menu
+	if sm.Mode == ModeIdle {
+		menu = fyne.NewMenu("Rest Reminder",
+			fyne.NewMenuItem("Start Focus", func() {
+				sm.Start()
+			}),
+			fyne.NewMenuItem("Start Short Break", func() {
+				sm.StartShortRest()
+			}),
+			fyne.NewMenuItem("Start Long Break", func() {
+				sm.StartLongRest()
+			}),
+			fyne.NewMenuItem("Open Dashboard", func() {
+				dashboardWin.Show()
+				dashboardWin.RequestFocus()
+			}),
+		)
+	} else {
+		menu = fyne.NewMenu("Rest Reminder",
+			fyne.NewMenuItem("Stop", func() {
+				sm.Stop()
+			}),
+			fyne.NewMenuItem("Open Dashboard", func() {
+				dashboardWin.Show()
+				dashboardWin.RequestFocus()
+			}),
+		)
 	}
+	desk.SetSystemTrayMenu(menu)
 }

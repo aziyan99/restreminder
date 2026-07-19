@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-var version = "0.1.2"
+var version = "0.2.2"
 
 func main() {
 	showVersion := flag.Bool("v", false, "show version and exit")
